@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"unicode"
 )
 
 type FileContext struct {
@@ -23,6 +26,7 @@ type FileContext struct {
 type Lexer struct {
 	fileStack   []*FileContext // context stack.
 	currentFile *FileContext   // active compiling context.
+	decimalSep  rune           // '.' (default) or ','
 }
 
 // helper function mimicing the ternary operator.
@@ -33,11 +37,21 @@ func If[T any](condition bool, trueValue, falseValue T) T {
 	return falseValue
 }
 
-func New(fileContext FileContext, cfg *config.Config) *Lexer {
-	// Build the keyword map from the config before scanning anything.
-	token.RegisterKeywords(buildKeywordMap(cfg))
+func New(fileContext FileContext, cfg ...*config.Config) *Lexer {
 
-	l := &Lexer{currentFile: &fileContext}
+	l := &Lexer{
+		currentFile: &fileContext,
+		decimalSep:  '.',
+	}
+	if len(cfg) > 0 && cfg[0] != nil {
+		// Build the keyword map from the config before scanning anything.
+		token.RegisterKeywords(buildKeywordMap(cfg[0]))
+
+		if cfg[0].Meta.DecimalSep == "," {
+			l.decimalSep = ','
+		}
+	}
+
 	if fileContext.Filename != "" {
 		if err := l.PushFile(fileContext.Filename); err != nil {
 			fmt.Fprintf(os.Stderr, "lexer: %v\n", err)
@@ -193,6 +207,16 @@ func (l *Lexer) peek() rune {
 	return f.source[f.readPos]
 }
 
+// peekAt returns the rune n positions ahead without consuming anything.
+func (l *Lexer) peekAt(n int) rune {
+	f := l.currentFile
+	pos := f.readPos + n
+	if pos >= len(f.source) {
+		return 0
+	}
+	return f.source[pos]
+}
+
 // newToken constructs a Token from the current file context.
 func (l *Lexer) newToken(tt token.TokenType, lexeme string, literal any) token.Token {
 	f := l.currentFile
@@ -259,7 +283,17 @@ func (l *Lexer) ScanTokens() []token.Token {
 		case '+':
 			tokens = append(tokens, l.matchToken('+', token.PLUS, "+", token.PLUS_PLUS, "++"))
 		case '/':
-			tokens = append(tokens, l.matchToken('/', token.SLASH, "/", token.SLASH_SLASH, "//"))
+			if l.match('/') {
+				for l.peek() != '\n' && !l.isAtEnd() {
+					l.advance()
+				}
+			} else if l.match('*') {
+				if err := l.skipBlockComment(); err != nil {
+					fmt.Fprintf(os.Stderr, "%v\n", err)
+				}
+			} else {
+				tokens = append(tokens, l.newToken(token.SLASH, "/", nil))
+			}
 		case '*':
 			tokens = append(tokens, l.matchToken('*', token.STAR, "*", token.STAR_STAR, "**"))
 		case '<':
@@ -293,8 +327,18 @@ func (l *Lexer) ScanTokens() []token.Token {
 			tokens = append(tokens,
 				l.newToken(token.STRING, value, value))
 
+		case '\'':
+			tok, err := l.scanChar()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				continue
+			}
+			tokens = append(tokens, tok)
+
 		default:
-			if isLetter(ch) {
+			if isDigit(ch) {
+				tokens = append(tokens, l.scanNumber(ch))
+			} else if isLetter(ch) {
 				word := l.scanIdentifier()
 				tt := token.LookupKeyword(word)
 				tokens = append(tokens, l.newToken(tt, word, nil))
@@ -306,6 +350,21 @@ func (l *Lexer) ScanTokens() []token.Token {
 	}
 
 	return tokens
+}
+
+// skip comments
+func (l *Lexer) skipBlockComment() error {
+	for {
+		ch := l.advance()
+		if ch == 0 {
+			return fmt.Errorf("%s:%d:%d: unterminated block comment",
+				l.currentFile.Filename, l.currentFile.line, l.currentFile.column)
+		}
+		if ch == '*' && l.peek() == '/' {
+			l.advance() // consume '/'
+			return nil
+		}
+	}
 }
 
 // match consumes the next rune only if it equals expected.
@@ -337,13 +396,11 @@ func (l *Lexer) matchToken(
 }
 
 func isLetter(ch rune) bool {
-	return (ch >= 'a' && ch <= 'z') ||
-		(ch >= 'A' && ch <= 'Z') ||
-		ch == '_'
+	return unicode.IsLetter(ch) || ch == '_'
 }
 
 func isDigit(ch rune) bool {
-	return ch >= '0' && ch <= '9'
+	return unicode.IsDigit(ch)
 }
 
 // scanIdentifier reads a full identifier or keyword starting from the
@@ -359,25 +416,98 @@ func (l *Lexer) scanIdentifier() string {
 }
 
 func (l *Lexer) scanString() (string, error) {
-	f := l.currentFile
-
-	start := f.readPos
-
+	var buf strings.Builder
 	for {
 		ch := l.advance()
-
-		if ch == 0 {
-			return "", fmt.Errorf("unterminated string")
-		}
-
-		if ch == '"' {
-			break
+		switch ch {
+		case 0:
+			return "", fmt.Errorf("%s:%d:%d: unterminated string",
+				l.currentFile.Filename, l.currentFile.line, l.currentFile.column)
+		case '"':
+			return buf.String(), nil
+		case '\\':
+			r, err := l.scanEscape()
+			if err != nil {
+				return "", err
+			}
+			buf.WriteRune(r)
+		default:
+			buf.WriteRune(ch)
 		}
 	}
+}
 
-	end := f.position
+// scanChar scans a character literal after the opening ' has been consumed.
+func (l *Lexer) scanChar() (token.Token, error) {
+	ch := l.advance()
+	if ch == 0 {
+		return token.Token{}, fmt.Errorf("%s:%d:%d: unterminated char literal",
+			l.currentFile.Filename, l.currentFile.line, l.currentFile.column)
+	}
 
-	return string(f.source[start:end]), nil
+	var value rune
+	if ch == '\\' {
+		escaped, err := l.scanEscape()
+		if err != nil {
+			return token.Token{}, err
+		}
+		value = escaped
+	} else {
+		value = ch
+	}
+
+	if l.advance() != '\'' {
+		return token.Token{}, fmt.Errorf("%s:%d:%d: char literal not terminated",
+			l.currentFile.Filename, l.currentFile.line, l.currentFile.column)
+	}
+
+	lexeme := "'" + string(value) + "'"
+	return l.newToken(token.CHARACTER, lexeme, value), nil
+}
+
+// scanEscape processes a backslash escape sequence.
+// The leading '\' has already been consumed.
+func (l *Lexer) scanEscape() (rune, error) {
+	ch := l.advance()
+	switch ch {
+	case 'n':
+		return '\n', nil
+	case 't':
+		return '\t', nil
+	case 'r':
+		return '\r', nil
+	case '\\':
+		return '\\', nil
+	case '"':
+		return '"', nil
+	case '\'':
+		return '\'', nil
+	case '0':
+		return 0, nil
+	case 'x':
+		// \xHH
+		h1 := l.advance()
+		h2 := l.advance()
+		val, err := strconv.ParseInt(string([]rune{h1, h2}), 16, 32)
+		if err != nil {
+			return 0, fmt.Errorf("invalid hex escape \\x%c%c", h1, h2)
+		}
+		return rune(val), nil
+	case 'u':
+		// \uHHHH
+		buf := make([]rune, 4)
+		for i := range buf {
+			buf[i] = l.advance()
+		}
+		val, err := strconv.ParseInt(string(buf), 16, 32)
+		if err != nil {
+			return 0, fmt.Errorf("invalid unicode escape \\u%s", string(buf))
+		}
+		return rune(val), nil
+	default:
+		return 0, fmt.Errorf("%s:%d:%d: unknown escape sequence '\\%c'",
+			l.currentFile.Filename, l.currentFile.line, l.currentFile.column, ch)
+	}
 }
 
 func FileExist(filePath string) (bool, error) {
@@ -405,4 +535,84 @@ func FileExist(filePath string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// scanNumber scans an integer or real literal.
+// ch is the first digit, already consumed.
+func (l *Lexer) scanNumber(first rune) token.Token {
+	f := l.currentFile
+	start := f.position
+
+	// prefixed integer bases
+	if first == '0' {
+		switch l.peek() {
+		case 'x', 'X':
+			l.advance() // consume 'x'
+			for isHexDigit(l.peek()) {
+				l.advance()
+			}
+			lexeme := string(f.source[start : f.position+1])
+			val, _ := strconv.ParseInt(lexeme[2:], 16, 64)
+			return l.newToken(token.INTEGER, lexeme, val)
+
+		case 'b', 'B':
+			l.advance()
+			for l.peek() == '0' || l.peek() == '1' {
+				l.advance()
+			}
+			lexeme := string(f.source[start : f.position+1])
+			val, _ := strconv.ParseInt(lexeme[2:], 2, 64)
+			return l.newToken(token.INTEGER, lexeme, val)
+
+		case 'o', 'O':
+			l.advance()
+			for isOctalDigit(l.peek()) {
+				l.advance()
+			}
+			lexeme := string(f.source[start : f.position+1])
+			val, _ := strconv.ParseInt(lexeme[2:], 8, 64)
+			return l.newToken(token.INTEGER, lexeme, val)
+		}
+	}
+
+	// decimal integer or real
+	for isDigit(l.peek()) {
+		l.advance()
+	}
+
+	// check for decimal separator followed by more digits → real
+	if l.peek() == l.decimalSep && isDigit(l.peekAt(1)) {
+		l.advance() // consume separator
+		for isDigit(l.peek()) {
+			l.advance()
+		}
+		// optional exponent: e / E followed by optional '-' then digits
+		if l.peek() == 'e' || l.peek() == 'E' {
+			l.advance()
+			if l.peek() == '-' {
+				l.advance()
+			}
+			for isDigit(l.peek()) {
+				l.advance()
+			}
+		}
+		lexeme := string(f.source[start : f.position+1])
+		// normalise: replace ',' with '.' so strconv.ParseFloat works
+		val, _ := strconv.ParseFloat(strings.ReplaceAll(lexeme, ",", "."), 64)
+		return l.newToken(token.DOUBLE, lexeme, val)
+	}
+
+	lexeme := string(f.source[start : f.position+1])
+	val, _ := strconv.ParseInt(lexeme, 10, 64)
+	return l.newToken(token.INTEGER, lexeme, val)
+}
+
+func isHexDigit(ch rune) bool {
+	return (ch >= '0' && ch <= '9') ||
+		(ch >= 'a' && ch <= 'f') ||
+		(ch >= 'A' && ch <= 'F')
+}
+
+func isOctalDigit(ch rune) bool {
+	return ch >= '0' && ch <= '7'
 }

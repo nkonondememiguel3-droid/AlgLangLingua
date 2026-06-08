@@ -44,7 +44,6 @@ const (
 	PLUS
 	PLUS_PLUS
 	SLASH
-	SLASH_SLASH
 	STAR
 	STAR_STAR
 	EQUAL_EQUAL
@@ -178,7 +177,6 @@ var tokens = [...]string{
 	PLUS:             "+",
 	PLUS_PLUS:        "++",
 	SLASH:            "/",
-	SLASH_SLASH:      "//",
 	STAR:             "*",
 	STAR_STAR:        "**",
 	EQUAL_EQUAL:      "==",
