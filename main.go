@@ -20,7 +20,15 @@ func main() {
 
 	fileContext := lexer.FileContext{Filename: os.Args[2]}
 	l := lexer.New(fileContext, cfg)
-	tokens := l.ScanTokens()
+	tokens, diags := l.ScanTokens()
+	if diags.HasErrors() {
+		fmt.Fprint(os.Stderr, diags.Format())
+		os.Exit(1)
+	}
+	// warnings don't stop compilation
+	if len(diags.Warnings()) > 0 {
+		fmt.Fprint(os.Stderr, diags.Format())
+	}
 
 	for _, tk := range tokens {
 		fmt.Println(tk)
