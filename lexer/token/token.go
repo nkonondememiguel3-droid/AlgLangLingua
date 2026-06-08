@@ -28,6 +28,25 @@ const (
 	LEFT_BRACE
 	RIGHT_BRACE
 	BANG
+
+	// One or two character tokens
+	LESS
+	LESS_OR_EQUAL
+	DIFF
+	ASSIGN
+	GREATER
+	GREATER_OR_EQUAL
+	MINUS
+	MINUS_MINUS
+	PLUS
+	PLUS_PLUS
+	SLASH
+	SLASH_SLASH
+	STAR
+	STAR_STAR
+	EQUAL_EQUAL
+	DOT_DOT // .. for array ranges
+
 )
 
 var keywords = map[string]TokenType{}
@@ -45,6 +64,24 @@ var tokens = [...]string{
 	LEFT_BRACE:    "left_brace",
 	RIGHT_BRACE:   "right_brace",
 	BANG:          "bang",
+
+	// One or two character tokens
+	LESS:             "<",
+	LESS_OR_EQUAL:    "<=",
+	DIFF:             "<>",
+	ASSIGN:           "<-",
+	GREATER:          ">",
+	GREATER_OR_EQUAL: ">=",
+	MINUS:            "-",
+	MINUS_MINUS:      "--",
+	PLUS:             "+",
+	PLUS_PLUS:        "++",
+	SLASH:            "/",
+	SLASH_SLASH:      "//",
+	STAR:             "*",
+	STAR_STAR:        "**",
+	EQUAL_EQUAL:      "==",
+	DOT_DOT:          "..",
 }
 
 // String returns the string corresponding to the token tok.

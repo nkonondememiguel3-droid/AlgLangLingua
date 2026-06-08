@@ -170,14 +170,13 @@ func (l *Lexer) ScanTokens() []token.Token {
 		case '\n':
 			continue
 
+			// one character token.
 		case ',':
 			tokens = append(tokens, l.newToken(token.COMMA, ",", nil))
 		case ';':
 			tokens = append(tokens, l.newToken(token.SEMICOLON, ";", nil))
 		case ':':
 			tokens = append(tokens, l.newToken(token.COLON, ":", nil))
-		case '.':
-			tokens = append(tokens, l.newToken(token.DOT, ".", nil))
 		case '(':
 			tokens = append(tokens, l.newToken(token.LEFT_PAREN, "(", nil))
 		case ')':
@@ -193,6 +192,38 @@ func (l *Lexer) ScanTokens() []token.Token {
 		case '!':
 			tokens = append(tokens, l.newToken(token.BANG, "!", nil))
 
+			// one or two character tokens.
+		case '.':
+			tokens = append(tokens, l.matchToken('.', token.DOT, ".", token.DOT_DOT, ".."))
+		case '-':
+			tokens = append(tokens, l.matchToken('-', token.MINUS, "-", token.MINUS_MINUS, "--"))
+		case '+':
+			tokens = append(tokens, l.matchToken('+', token.PLUS, "+", token.PLUS_PLUS, "++"))
+		case '/':
+			tokens = append(tokens, l.matchToken('/', token.SLASH, "/", token.SLASH_SLASH, "//"))
+		case '*':
+			tokens = append(tokens, l.matchToken('*', token.STAR, "*", token.STAR_STAR, "**"))
+		case '<':
+			switch {
+			case l.match('='):
+				tokens = append(tokens, l.newToken(token.LESS_OR_EQUAL, "<=", nil))
+			case l.match('>'):
+				tokens = append(tokens, l.newToken(token.DIFF, "<>", nil))
+			case l.match('-'):
+				tokens = append(tokens, l.newToken(token.ASSIGN, "<-", nil))
+			default:
+				tokens = append(tokens, l.newToken(token.LESS, "<", nil))
+			}
+		case '>':
+			tokens = append(tokens, l.matchToken('=', token.GREATER, ">", token.GREATER_OR_EQUAL, ">="))
+		case '=':
+			if l.match('=') {
+				tokens = append(tokens, l.newToken(token.EQUAL_EQUAL, "==", nil))
+			} else {
+				fmt.Fprintf(os.Stderr, "%s:%d:%d: unexpected character %q\n",
+					f.Filename, f.line, f.column, ch)
+			}
+
 		default:
 			fmt.Fprintf(os.Stderr, "%s:%d:%d: unexpected character %q\n",
 				f.Filename, f.line, f.column, ch)
@@ -201,6 +232,35 @@ func (l *Lexer) ScanTokens() []token.Token {
 
 	return tokens
 }
+
+// match consumes the next rune only if it equals expected.
+func (l *Lexer) match(expected rune) bool {
+	if l.peek() != expected {
+		return false
+	}
+	l.advance() // consume it
+	return true
+}
+
+// isAtEnd reports whether all source runes have been consumed.
+func (l *Lexer) isAtEnd() bool {
+	return l.currentFile.readPos >= len(l.currentFile.source)
+}
+
+// matchToken tries to match the next rune against next.
+// On success it emits the two-char token (doubleType/doubleLexeme).
+// On failure it emits the single-char token (singleType/singleLexeme).
+func (l *Lexer) matchToken(
+	next rune,
+	singleType token.TokenType, singleLexeme string,
+	doubleType token.TokenType, doubleLexeme string,
+) token.Token {
+	if l.match(next) {
+		return l.newToken(doubleType, doubleLexeme, nil)
+	}
+	return l.newToken(singleType, singleLexeme, nil)
+}
+
 func FileExist(filePath string) (bool, error) {
 
 	// check if the files exists.
