@@ -5,94 +5,46 @@ import "strconv"
 type TokenType int
 
 type Token struct {
-	Type    TokenType
-	Literal string
+	Type    TokenType // type of the token.
+	Lexeme  string    // the lexeme of the token. eg: "morning" -> string
+	Literal any       // the literal of the token. eg: "morning" -> morning
 	Line    int
 	Column  int
+	File    string // the file where the token occured
 }
 
 const (
-	ILLEGAL TokenType = iota
-	EOF
+	_ TokenType = iota
 
-	IDENTIFIER
-	INT
-
-	ASSIGN
-	PLUS
-	MINUS
-	BANG
-	STAR
-	SLASH
-
-	LT
-	GT
-	EQ
-	NOT_EQ
-
+	// Single character tokens
 	COMMA
 	SEMICOLON
-
+	COLON
+	DOT
 	LEFT_PAREN
 	RIGHT_PAREN
+	LEFT_BRACKET
+	RIGHT_BRACKET
 	LEFT_BRACE
 	RIGHT_BRACE
-
-	FUNCTION
-	LET
-	TRUE
-	FALSE
-	IF
-	ELSE
-	RETURN
+	BANG
 )
 
-var keywords = map[string]TokenType{
-	"fn":     FUNCTION,
-	"let":    LET,
-	"true":   TRUE,
-	"false":  FALSE,
-	"if":     IF,
-	"else":   ELSE,
-	"return": RETURN,
-}
-
-func LookupIdentifer(identifier string) TokenType {
-	if tok, ok := keywords[identifier]; ok {
-		return tok
-	}
-	return IDENTIFIER
-}
+var keywords = map[string]TokenType{}
 
 var tokens = [...]string{
-	ILLEGAL: "illegal",
-	EOF:     "eof",
-
-	IDENTIFIER: "identifier",
-	INT:        "int",
-
-	ASSIGN: "assign",
-	PLUS:   "plus",
-	MINUS:  "minus",
-	BANG:   "!",
-	STAR:   "*",
-	SLASH:  "/",
-
-	LT:     "less",
-	GT:     "greater",
-	EQ:     "==",
-	NOT_EQ: "!=",
-
-	COMMA:     "comma",
-	SEMICOLON: "semicolon",
-
-	LEFT_PAREN:  "left_parenthese",
-	RIGHT_PAREN: "right_parenthese",
-	LEFT_BRACE:  "left_brace",
-	RIGHT_BRACE: "right_brace",
-
-	FUNCTION: "function",
-	LET:      "let",
+	// Single character tokens
+	COMMA:         "comma",
+	SEMICOLON:     "semicolon",
+	COLON:         "colon",
+	DOT:           "dot",
+	LEFT_PAREN:    "left_paren",
+	RIGHT_PAREN:   "right_paren",
+	LEFT_BRACKET:  "left_bracket",
+	RIGHT_BRACKET: "right_bracket",
+	LEFT_BRACE:    "left_brace",
+	RIGHT_BRACE:   "right_brace",
+	BANG:          "bang",
 }
 
 // String returns the string corresponding to the token tok.
