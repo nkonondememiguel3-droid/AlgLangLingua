@@ -497,3 +497,463 @@ func TestDotVsDotDot(t *testing.T) {
 		t.Errorf("expected DOT_DOT, got %q", toks[1].Type)
 	}
 }
+
+func TestEdgeCases(t *testing.T) {
+	t.Run("empty source", func(t *testing.T) {
+		l := New(FileContext{source: []rune("")})
+		toks := l.ScanTokens()
+		if len(toks) != 0 {
+			t.Errorf("expected 0 tokens, got %d", len(toks))
+		}
+	})
+
+	t.Run("whitespace only", func(t *testing.T) {
+		l := New(FileContext{source: []rune("   \t\r\n   ")})
+		toks := l.ScanTokens()
+		if len(toks) != 0 {
+			t.Errorf("expected 0 tokens, got %d", len(toks))
+		}
+	})
+
+	t.Run("comment only", func(t *testing.T) {
+		l := New(FileContext{source: []rune("// nothing here\n/* also nothing */")})
+		toks := l.ScanTokens()
+		if len(toks) != 0 {
+			t.Errorf("expected 0 tokens, got %d", len(toks))
+		}
+	})
+}
+
+func TestIntegerEdgeCases(t *testing.T) {
+	tests := []struct {
+		input   string
+		lexeme  string
+		literal int64
+	}{
+		// zero
+		{"0", "0", 0},
+		// hex uppercase prefix
+		{"0XFF", "0XFF", 255},
+		// hex zero
+		{"0x0", "0x0", 0},
+		// binary uppercase prefix
+		{"0B1111", "0B1111", 15},
+		// binary zero
+		{"0b0", "0b0", 0},
+		// octal uppercase prefix
+		{"0O77", "0O77", 63},
+		// octal zero
+		{"0o0", "0o0", 0},
+		// large decimal
+		{"1000000", "1000000", 1_000_000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := New(FileContext{source: []rune(tt.input)})
+			toks := l.ScanTokens()
+			if len(toks) != 1 {
+				t.Fatalf("expected 1 token, got %d", len(toks))
+			}
+			tok := toks[0]
+			if tok.Type != token.INTEGER {
+				t.Errorf("type: expected INTEGER, got %q", tok.Type)
+			}
+			if tok.Lexeme != tt.lexeme {
+				t.Errorf("lexeme: expected %q, got %q", tt.lexeme, tok.Lexeme)
+			}
+			if tok.Literal.(int64) != tt.literal {
+				t.Errorf("literal: expected %d, got %v", tt.literal, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestRealEdgeCases(t *testing.T) {
+	tests := []struct {
+		input   string
+		lexeme  string
+		literal float64
+	}{
+		{"0.0", "0.0", 0.0},
+		{"1.0", "1.0", 1.0},
+		// uppercase E exponent
+		{"1.0E10", "1.0E10", 1.0e10},
+		// exponent without negative
+		{"2.5e3", "2.5e3", 2500.0},
+		// large exponent
+		{"1.0e100", "1.0e100", 1.0e100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := New(FileContext{source: []rune(tt.input)})
+			toks := l.ScanTokens()
+			if len(toks) != 1 {
+				t.Fatalf("expected 1 token, got %d: %v", len(toks), toks)
+			}
+			tok := toks[0]
+			if tok.Type != token.DOUBLE {
+				t.Errorf("type: expected DOUBLE, got %q", tok.Type)
+			}
+			if tok.Lexeme != tt.lexeme {
+				t.Errorf("lexeme: expected %q, got %q", tt.lexeme, tok.Lexeme)
+			}
+			if tok.Literal.(float64) != tt.literal {
+				t.Errorf("literal: expected %v, got %v", tt.literal, tok.Literal)
+			}
+		})
+	}
+}
+
+// A dot not followed by another dot or a digit must be a plain DOT,
+// not accidentally consumed into a number or DOT_DOT.
+func TestDotDisambiguation(t *testing.T) {
+	t.Run("dot between identifiers", func(t *testing.T) {
+		// struct field access: foo.bar
+		l := New(FileContext{source: []rune("foo.bar")})
+		toks := l.ScanTokens()
+		// IDENTIFIER DOT IDENTIFIER
+		if len(toks) != 3 {
+			t.Fatalf("expected 3 tokens, got %d: %v", len(toks), toks)
+		}
+		if toks[1].Type != token.DOT {
+			t.Errorf("expected DOT, got %q", toks[1].Type)
+		}
+	})
+
+	t.Run("dot dot in range with reals", func(t *testing.T) {
+		// 1.0..2.0 -> DOUBLE DOT_DOT DOUBLE
+		l := New(FileContext{source: []rune("1.0..2.0")})
+		toks := l.ScanTokens()
+		if len(toks) != 3 {
+			t.Fatalf("expected 3 tokens, got %d: %v", len(toks), toks)
+		}
+		if toks[0].Type != token.DOUBLE {
+			t.Errorf("[0] expected DOUBLE, got %q", toks[0].Type)
+		}
+		if toks[1].Type != token.DOT_DOT {
+			t.Errorf("[1] expected DOT_DOT, got %q", toks[1].Type)
+		}
+		if toks[2].Type != token.DOUBLE {
+			t.Errorf("[2] expected DOUBLE, got %q", toks[2].Type)
+		}
+	})
+
+	t.Run("integer followed by dot dot", func(t *testing.T) {
+		// already covered by TestDotVsDotDot but explicit here
+		l := New(FileContext{source: []rune("5..15")})
+		toks := l.ScanTokens()
+		if len(toks) != 3 {
+			t.Fatalf("expected 3 tokens, got %d", len(toks))
+		}
+		if toks[1].Type != token.DOT_DOT {
+			t.Errorf("expected DOT_DOT, got %q", toks[1].Type)
+		}
+	})
+}
+
+// Zero followed by a non-prefix letter is integer 0 then an identifier,
+// not a bad literal.
+func TestZeroFollowedByIdentifier(t *testing.T) {
+	l := New(FileContext{source: []rune("0abc")})
+	toks := l.ScanTokens()
+	if len(toks) != 2 {
+		t.Fatalf("expected 2 tokens, got %d: %v", len(toks), toks)
+	}
+	if toks[0].Type != token.INTEGER || toks[0].Literal.(int64) != 0 {
+		t.Errorf("expected INTEGER(0), got %q %v", toks[0].Type, toks[0].Literal)
+	}
+	if toks[1].Type != token.IDENTIFIER || toks[1].Lexeme != "abc" {
+		t.Errorf("expected IDENTIFIER(abc), got %q %q", toks[1].Type, toks[1].Lexeme)
+	}
+}
+
+// Integer immediately adjacent to an identifier with no space.
+func TestIntegerAdjacentToIdentifier(t *testing.T) {
+	l := New(FileContext{source: []rune("42abc")})
+	toks := l.ScanTokens()
+	if len(toks) != 2 {
+		t.Fatalf("expected 2 tokens, got %d: %v", len(toks), toks)
+	}
+	if toks[0].Type != token.INTEGER || toks[0].Literal.(int64) != 42 {
+		t.Errorf("expected INTEGER(42), got %q %v", toks[0].Type, toks[0].Literal)
+	}
+	if toks[1].Type != token.IDENTIFIER || toks[1].Lexeme != "abc" {
+		t.Errorf("expected IDENTIFIER(abc), got %q %q", toks[1].Type, toks[1].Lexeme)
+	}
+}
+
+// French config: "0,abc" must be integer 0 then COMMA then identifier,
+// not a partial real.
+func TestFrenchZeroCommaNotReal(t *testing.T) {
+	cfg := loadConfig(t, "../lang/fr.toml")
+	l := New(FileContext{source: []rune("0,abc")}, cfg)
+	toks := l.ScanTokens()
+	// INTEGER(0) COMMA IDENTIFIER(abc)
+	if len(toks) != 3 {
+		t.Fatalf("expected 3 tokens, got %d: %v", len(toks), toks)
+	}
+	if toks[0].Type != token.INTEGER {
+		t.Errorf("[0] expected INTEGER, got %q", toks[0].Type)
+	}
+	if toks[1].Type != token.COMMA {
+		t.Errorf("[1] expected COMMA, got %q", toks[1].Type)
+	}
+	if toks[2].Type != token.IDENTIFIER {
+		t.Errorf("[2] expected IDENTIFIER, got %q", toks[2].Type)
+	}
+}
+
+func TestStringAllEscapes(t *testing.T) {
+	// Each escape in its own string so failures are isolated.
+	tests := []struct {
+		input   string // the raw source including quotes
+		literal string // what the literal value should be after unescaping
+	}{
+		{`"\n"`, "\n"},
+		{`"\t"`, "\t"},
+		{`"\r"`, "\r"},
+		{`"\\"`, "\\"},
+		{`"\""`, "\""},
+		{`"\0"`, "\x00"},
+		{`"\x41"`, "A"},   // hex byte 0x41 = 'A'
+		{`"\u0041"`, "A"}, // unicode U+0041 = 'A'
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := New(FileContext{source: []rune(tt.input)})
+			toks := l.ScanTokens()
+			if len(toks) != 1 {
+				t.Fatalf("expected 1 token, got %d", len(toks))
+			}
+			if toks[0].Type != token.STRING {
+				t.Errorf("expected STRING, got %q", toks[0].Type)
+			}
+			if toks[0].Literal.(string) != tt.literal {
+				t.Errorf("expected %q, got %q", tt.literal, toks[0].Literal)
+			}
+		})
+	}
+}
+
+func TestCharAllEscapes(t *testing.T) {
+	tests := []struct {
+		input   string
+		literal rune
+	}{
+		{`'\n'`, '\n'},
+		{`'\t'`, '\t'},
+		{`'\r'`, '\r'},
+		{`'\\'`, '\\'},
+		{`'\''`, '\''},
+		{`'\0'`, 0},
+		{`'\x41'`, 'A'},
+		{`'\u0041'`, 'A'},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := New(FileContext{source: []rune(tt.input)})
+			toks := l.ScanTokens()
+			if len(toks) != 1 {
+				t.Fatalf("expected 1 token, got %d", len(toks))
+			}
+			if toks[0].Type != token.CHARACTER {
+				t.Errorf("expected CHARACTER, got %q", toks[0].Type)
+			}
+			if toks[0].Literal.(rune) != tt.literal {
+				t.Errorf("expected %q (%d), got %q (%d)",
+					tt.literal, tt.literal, toks[0].Literal, toks[0].Literal)
+			}
+		})
+	}
+}
+
+// Non-ASCII char literal: 'à'
+func TestUnicodeCharLiteral(t *testing.T) {
+	l := New(FileContext{source: []rune("'à'")})
+	toks := l.ScanTokens()
+	if len(toks) != 1 {
+		t.Fatalf("expected 1 token, got %d", len(toks))
+	}
+	if toks[0].Type != token.CHARACTER {
+		t.Errorf("expected CHARACTER, got %q", toks[0].Type)
+	}
+	if toks[0].Literal.(rune) != 'à' {
+		t.Errorf("expected 'à', got %q", toks[0].Literal)
+	}
+}
+
+// Keywords are stored lowercase; mixed-case surface words must still resolve.
+func TestKeywordCaseInsensitive(t *testing.T) {
+	cfg := loadConfig(t, "../lang/en.toml")
+	// "IF", "If", "iF" should all resolve to token.IF
+	input := `IF If iF`
+	l := New(FileContext{source: []rune(input)}, cfg)
+	toks := l.ScanTokens()
+	if len(toks) != 3 {
+		t.Fatalf("expected 3 tokens, got %d", len(toks))
+	}
+	for i, tok := range toks {
+		if tok.Type != token.IF {
+			t.Errorf("[%d] expected IF, got %q (lexeme %q)", i, tok.Type, tok.Lexeme)
+		}
+	}
+}
+
+// Operators with no surrounding whitespace must still tokenise correctly.
+func TestOperatorsNoWhitespace(t *testing.T) {
+	// x<-42+y*2==z
+	input := `x<-42+y*2==z`
+	l := New(FileContext{source: []rune(input)})
+	toks := l.ScanTokens()
+
+	expected := []token.TokenType{
+		token.IDENTIFIER,  // x
+		token.ASSIGN,      // <-
+		token.INTEGER,     // 42
+		token.PLUS,        // +
+		token.IDENTIFIER,  // y
+		token.STAR,        // *
+		token.INTEGER,     // 2
+		token.EQUAL_EQUAL, // ==
+		token.IDENTIFIER,  // z
+	}
+	if len(toks) != len(expected) {
+		t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(toks), toks)
+	}
+	for i, tt := range expected {
+		if toks[i].Type != tt {
+			t.Errorf("[%d] expected %q, got %q (lexeme %q)", i, tt, toks[i].Type, toks[i].Lexeme)
+		}
+	}
+}
+
+func TestLineAndColumnTracking(t *testing.T) {
+	input := "foo\nbar\nbaz"
+	l := New(FileContext{source: []rune(input)})
+	toks := l.ScanTokens()
+
+	if len(toks) != 3 {
+		t.Fatalf("expected 3 tokens, got %d", len(toks))
+	}
+
+	cases := []struct{ line, col int }{
+		{1, 3}, // "foo": line 1, last char at col 3
+		{2, 3}, // "bar": line 2, last char at col 3
+		{3, 3}, // "baz": line 3, last char at col 3
+	}
+	for i, c := range cases {
+		if toks[i].Line != c.line {
+			t.Errorf("[%d] line: expected %d, got %d", i, c.line, toks[i].Line)
+		}
+		if toks[i].Column != c.col {
+			t.Errorf("[%d] col: expected %d, got %d", i, c.col, toks[i].Column)
+		}
+	}
+}
+
+// Error recovery: an unterminated string should not crash the lexer;
+// scanning must continue and return whatever valid tokens follow.
+func TestUnterminatedStringRecovery(t *testing.T) {
+	// unterminated string, then a valid integer on a new line
+	input := "\"unterminated\n99"
+	l := New(FileContext{source: []rune(input)})
+	toks := l.ScanTokens()
+	// The unterminated string emits nothing (error to stderr).
+	// 99 must still be scanned.
+	if len(toks) != 1 {
+		t.Fatalf("expected 1 token after error recovery, got %d: %v", len(toks), toks)
+	}
+	if toks[0].Type != token.INTEGER || toks[0].Literal.(int64) != 99 {
+		t.Errorf("expected INTEGER(99), got %q %v", toks[0].Type, toks[0].Literal)
+	}
+}
+
+// Error recovery: unterminated block comment must not crash.
+func TestUnterminatedBlockCommentRecovery(t *testing.T) {
+	input := "42 /* this never closes"
+	l := New(FileContext{source: []rune(input)})
+	toks := l.ScanTokens()
+	// 42 scanned before the comment; comment error goes to stderr.
+	if len(toks) != 1 {
+		t.Fatalf("expected 1 token, got %d: %v", len(toks), toks)
+	}
+	if toks[0].Literal.(int64) != 42 {
+		t.Errorf("expected 42, got %v", toks[0].Literal)
+	}
+}
+
+// Unknown characters must not crash the lexer; valid tokens either side
+// must still appear.
+func TestUnknownCharacterRecovery(t *testing.T) {
+	// '@' and '$' and '#' are not in the language
+	input := `42 @ 99 $ 1`
+	l := New(FileContext{source: []rune(input)})
+	toks := l.ScanTokens()
+	// three integers survive
+	if len(toks) != 3 {
+		t.Fatalf("expected 3 tokens, got %d: %v", len(toks), toks)
+	}
+	for i, want := range []int64{42, 99, 1} {
+		if toks[i].Literal.(int64) != want {
+			t.Errorf("[%d] expected %d, got %v", i, want, toks[i].Literal)
+		}
+	}
+}
+
+// A complete mini-program exercises everything together.
+func TestFullProgram(t *testing.T) {
+	input := `
+algorithm: test;
+var
+    x : integer;
+    y : real;
+begin
+    x <- 10;           // assign integer
+    y <- 3.14;         /* assign real */
+    if (x == 10) then:
+        write("hello");
+    endif
+end
+`
+	cfg := loadConfig(t, "../lang/en.toml")
+	l := New(FileContext{source: []rune(input)}, cfg)
+	toks := l.ScanTokens()
+
+	// spot-check a handful of tokens rather than the entire sequence
+	typeSeq := make([]token.TokenType, len(toks))
+	for i, tok := range toks {
+		typeSeq[i] = tok.Type
+	}
+
+	mustContain := []token.TokenType{
+		token.ALGORITHM,
+		token.VARIABLE,
+		token.INTEGER_TYPE,
+		token.DOUBLE_TYPE,
+		token.BEGIN,
+		token.ASSIGN,
+		token.INTEGER,
+		token.DOUBLE,
+		token.IF,
+		token.EQUAL_EQUAL,
+		token.THEN,
+		token.WRITE,
+		token.STRING,
+		token.ENDIF,
+		token.END,
+	}
+
+	seen := make(map[token.TokenType]bool)
+	for _, tt := range typeSeq {
+		seen[tt] = true
+	}
+	for _, want := range mustContain {
+		if !seen[want] {
+			t.Errorf("token %q missing from full-program scan", want)
+		}
+	}
+}

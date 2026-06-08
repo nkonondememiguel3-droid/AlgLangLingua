@@ -190,7 +190,7 @@ func (l *Lexer) advance() rune {
 
 	if f.ch == '\n' {
 		f.line++
-		f.column = 1
+		f.column = 0
 	} else {
 		f.column++
 	}
@@ -431,6 +431,11 @@ func (l *Lexer) scanString() (string, error) {
 				return "", err
 			}
 			buf.WriteRune(r)
+		case '\n':
+			// a raw newline inside a string is an error - strings must be
+			// closed on the same line (use \n escape for a newline value)
+			return "",
+				fmt.Errorf("%s:%d:%d: unterminated string (newline before closing quote)", l.currentFile.Filename, l.currentFile.line, l.currentFile.column)
 		default:
 			buf.WriteRune(ch)
 		}
