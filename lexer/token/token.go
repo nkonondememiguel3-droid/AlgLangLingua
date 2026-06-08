@@ -1,6 +1,9 @@
 package token
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 type TokenType int
 
@@ -47,9 +50,107 @@ const (
 	EQUAL_EQUAL
 	DOT_DOT // .. for array ranges
 
+	// Literals
+	IDENTIFIER
+
+	// Type keywords
+	INTEGER
+	INTEGER_TYPE
+	DOUBLE
+	DOUBLE_TYPE
+	STRING
+	STRING_TYPE
+	CHARACTER
+	CHARACTER_TYPE
+	BOOLEAN
+	BOOLEAN_TYPE
+
+	TABLE // Array/Table
+
+	// Program structure keywords
+	ALGORITHM
+	VARIABLE
+	CONSTANT
+	TYPE
+	BEGIN
+	END
+
+	// Function/Method keywords
+	FUNCTION
+	END_FUNCTION
+
+	METHOD
+	END_METHOD
+
+	RETURN
+
+	// Structure keywords
+	STRUCTURE
+	END_STRUCT
+
+	// Control flow keywords
+	IF
+	THEN
+	ELSE
+	ELSEIF
+	ENDIF
+
+	FOR
+	TO
+	STEP
+	ENDFOR
+
+	WHILE
+	DO
+	ENDWHILE
+
+	REPEAT
+	UNTIL
+
+	// Logical operators
+	AND
+	OR
+	NOT
+
+	// I/O keywords
+	WRITE
+	READ
+
+	// Boolean literals
+	TRUE
+	FALSE
+
+	// Other keywords
+	NIL
+	CLASS
+
+	MOD // Modulo operator
+	OF  // For array declarations: array[1..10] of integer
+
+	// Ambiguous/Special
+	INDENT
+	EOF
 )
 
 var keywords = map[string]TokenType{}
+
+// RegisterKeywords populates the keyword lookup table from the loaded config.
+// Must be called once, before the lexer runs.
+func RegisterKeywords(kw map[string]TokenType) {
+	for k, v := range kw {
+		keywords[strings.ToLower(k)] = v
+	}
+	// maps.Copy(keywords, kw)
+}
+
+// LookupKeyword returns the TokenType for a surface word, or IDENTIFIER if
+// the word is not a keyword in the active language config.
+func LookupKeyword(word string) TokenType {
+	if tt, ok := keywords[strings.ToLower(word)]; ok {
+		return tt
+	}
+	return IDENTIFIER
+}
 
 var tokens = [...]string{
 	// Single character tokens
@@ -82,6 +183,79 @@ var tokens = [...]string{
 	STAR_STAR:        "**",
 	EQUAL_EQUAL:      "==",
 	DOT_DOT:          "..",
+
+	// Literals
+	IDENTIFIER: "IDENTIFIER",
+
+	// Type keywords  (surface names vary, but the token constant name is fixed)
+	INTEGER:        "INTEGER_LITERAL",
+	INTEGER_TYPE:   "INTEGER_TYPE",
+	DOUBLE:         "REAL_LITERAL",
+	DOUBLE_TYPE:    "REAL_TYPE",
+	STRING:         "STRING_LITERAL",
+	STRING_TYPE:    "STRING_TYPE",
+	CHARACTER:      "CHAR_LITERAL",
+	CHARACTER_TYPE: "CHAR_TYPE",
+	BOOLEAN:        "BOOL_LITERAL",
+	BOOLEAN_TYPE:   "BOOL_TYPE",
+	TABLE:          "ARRAY",
+
+	// Program structure
+	ALGORITHM: "ALGORITHM",
+	VARIABLE:  "VAR",
+	CONSTANT:  "CONST",
+	TYPE:      "TYPE",
+	BEGIN:     "BEGIN",
+	END:       "END",
+
+	// Functions / Methods
+	FUNCTION:     "FUNCTION",
+	END_FUNCTION: "ENDFUNCTION",
+	METHOD:       "METHOD",
+	END_METHOD:   "ENDMETHOD",
+	RETURN:       "RETURN",
+
+	// Structures
+	STRUCTURE:  "STRUCT",
+	END_STRUCT: "ENDSTRUCT",
+
+	// Control flow
+	IF:       "IF",
+	THEN:     "THEN",
+	ELSE:     "ELSE",
+	ELSEIF:   "ELSEIF",
+	ENDIF:    "ENDIF",
+	FOR:      "FOR",
+	TO:       "TO",
+	STEP:     "STEP",
+	ENDFOR:   "ENDFOR",
+	WHILE:    "WHILE",
+	DO:       "DO",
+	ENDWHILE: "ENDWHILE",
+	REPEAT:   "REPEAT",
+	UNTIL:    "UNTIL",
+
+	// Logical
+	AND: "AND",
+	OR:  "OR",
+	NOT: "NOT",
+	MOD: "MOD",
+
+	// I/O
+	WRITE: "WRITE",
+	READ:  "READ",
+
+	// Boolean literals
+	TRUE:  "TRUE",
+	FALSE: "FALSE",
+
+	// Other
+	NIL:   "NIL",
+	CLASS: "CLASS",
+	OF:    "OF",
+
+	// Special
+	EOF: "EOF",
 }
 
 // String returns the string corresponding to the token tok.

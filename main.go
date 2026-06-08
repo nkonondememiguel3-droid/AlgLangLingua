@@ -1,6 +1,7 @@
 package main
 
 import (
+	"alg/config"
 	"alg/lexer"
 	"fmt"
 	"log"
@@ -8,20 +9,20 @@ import (
 )
 
 func main() {
-
-	if len(os.Args) != 2 {
-		log.Fatalf("Usage: alg <scrip>.al")
+	if len(os.Args) != 3 {
+		log.Fatalf("usage: alg <lang>.toml <script>.al")
 	}
-	filePath := os.Args[1]
 
-	fileContext := lexer.FileContext{
-		Filename: filePath,
+	cfg, err := config.Load(os.Args[1])
+	if err != nil {
+		log.Fatalf("config error: %v", err)
 	}
-	l := lexer.New(fileContext)
+
+	fileContext := lexer.FileContext{Filename: os.Args[2]}
+	l := lexer.New(fileContext, cfg)
 	tokens := l.ScanTokens()
 
 	for _, tk := range tokens {
 		fmt.Println(tk)
 	}
-
 }

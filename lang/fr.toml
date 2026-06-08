@@ -1,0 +1,58 @@
+[meta]
+name        = "Français"
+version     = "1.0"
+decimal_sep = ","
+
+[keywords]
+algorithm   = "algorithme"
+variable    = "variables"
+constant    = "constantes"
+type        = "type"
+begin       = "debut"
+end         = "fin"
+
+function     = "fonction"
+end_function = "finfonction"
+method       = "methode"
+end_method   = "finmethode"
+return       = "retourne"
+
+structure  = "structure"
+end_struct = "finstructure"
+
+if       = "si"
+then     = "alors"
+else     = "sinon"
+elseif   = "sinonsi"
+endif    = "finsi"
+for      = "pour"
+to       = "à"
+step     = "pas"
+endfor   = "finpour"
+while    = "tantque"
+do       = "faire"
+endwhile = "fintantque"
+repeat   = "repeter"
+until    = "jusqua"
+
+integer_type   = "entier"
+double_type    = "reel"
+string_type    = "chaine"
+character_type = "caractere"
+boolean_type   = "booleen"
+table          = "tableau"
+of             = "de"
+
+and = "et"
+or  = "ou"
+not = "non"
+mod = "mod"
+
+write = "ecrire"
+read  = "lire"
+
+true  = "vrai"
+false = "faux"
+
+nil   = "nil"
+class = "classe"

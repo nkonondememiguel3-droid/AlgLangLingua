@@ -1,5 +1,3 @@
-Algorithme: hello_world;
-Debut:
-    ecrire("Bonjour le monde!");
-    ecrire("Hello World!");
-Fin
+Algorithm: hello_world;
+Begin:
+End

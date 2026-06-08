@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"alg/config"
 	"alg/lexer/token"
 	"errors"
 	"fmt"
@@ -32,24 +33,82 @@ func If[T any](condition bool, trueValue, falseValue T) T {
 	return falseValue
 }
 
-func New(fileContext FileContext) *Lexer {
-	l := &Lexer{
-		currentFile: &fileContext,
-	}
-	// Only try to open a file when a real path was provided.
+func New(fileContext FileContext, cfg *config.Config) *Lexer {
+	// Build the keyword map from the config before scanning anything.
+	token.RegisterKeywords(buildKeywordMap(cfg))
+
+	l := &Lexer{currentFile: &fileContext}
 	if fileContext.Filename != "" {
 		if err := l.PushFile(fileContext.Filename); err != nil {
-			// caller will see an empty scan; you could also return an error
 			fmt.Fprintf(os.Stderr, "lexer: %v\n", err)
 		}
 	} else {
-		// In-memory source (tests): initialise line/column if not set.
 		if l.currentFile.line == 0 {
 			l.currentFile.line = 1
 			l.currentFile.column = 0
 		}
 	}
 	return l
+}
+
+// buildKeywordMap converts a config.Keywords struct into the
+// surface-word -> TokenType map that the lexer uses for lookup.
+func buildKeywordMap(cfg *config.Config) map[string]token.TokenType {
+	kw := cfg.Keywords
+	return map[string]token.TokenType{
+		kw.Algorithm: token.ALGORITHM,
+		kw.Variable:  token.VARIABLE,
+		kw.Constant:  token.CONSTANT,
+		kw.Type:      token.TYPE,
+		kw.Begin:     token.BEGIN,
+		kw.End:       token.END,
+
+		kw.Function:    token.FUNCTION,
+		kw.EndFunction: token.END_FUNCTION,
+		kw.Method:      token.METHOD,
+		kw.EndMethod:   token.END_METHOD,
+		kw.Return:      token.RETURN,
+
+		kw.Structure: token.STRUCTURE,
+		kw.EndStruct: token.END_STRUCT,
+
+		kw.If:       token.IF,
+		kw.Then:     token.THEN,
+		kw.Else:     token.ELSE,
+		kw.ElseIf:   token.ELSEIF,
+		kw.EndIf:    token.ENDIF,
+		kw.For:      token.FOR,
+		kw.To:       token.TO,
+		kw.Step:     token.STEP,
+		kw.EndFor:   token.ENDFOR,
+		kw.While:    token.WHILE,
+		kw.Do:       token.DO,
+		kw.EndWhile: token.ENDWHILE,
+		kw.Repeat:   token.REPEAT,
+		kw.Until:    token.UNTIL,
+
+		kw.IntegerType:   token.INTEGER_TYPE,
+		kw.DoubleType:    token.DOUBLE_TYPE,
+		kw.StringType:    token.STRING_TYPE,
+		kw.CharacterType: token.CHARACTER_TYPE,
+		kw.BooleanType:   token.BOOLEAN_TYPE,
+		kw.Table:         token.TABLE,
+		kw.Of:            token.OF,
+
+		kw.And: token.AND,
+		kw.Or:  token.OR,
+		kw.Not: token.NOT,
+		kw.Mod: token.MOD,
+
+		kw.Write: token.WRITE,
+		kw.Read:  token.READ,
+
+		kw.True:  token.TRUE,
+		kw.False: token.FALSE,
+
+		kw.Nil:   token.NIL,
+		kw.Class: token.CLASS,
+	}
 }
 
 func (l *Lexer) PushFile(path string) error {
@@ -223,10 +282,26 @@ func (l *Lexer) ScanTokens() []token.Token {
 				fmt.Fprintf(os.Stderr, "%s:%d:%d: unexpected character %q\n",
 					f.Filename, f.line, f.column, ch)
 			}
+		case '"':
+			value, err := l.scanString()
+
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				continue
+			}
+
+			tokens = append(tokens,
+				l.newToken(token.STRING, value, value))
 
 		default:
-			fmt.Fprintf(os.Stderr, "%s:%d:%d: unexpected character %q\n",
-				f.Filename, f.line, f.column, ch)
+			if isLetter(ch) {
+				word := l.scanIdentifier()
+				tt := token.LookupKeyword(word)
+				tokens = append(tokens, l.newToken(tt, word, nil))
+			} else {
+				fmt.Fprintf(os.Stderr, "%s:%d:%d: unexpected character %q\n",
+					f.Filename, f.line, f.column, ch)
+			}
 		}
 	}
 
@@ -259,6 +334,50 @@ func (l *Lexer) matchToken(
 		return l.newToken(doubleType, doubleLexeme, nil)
 	}
 	return l.newToken(singleType, singleLexeme, nil)
+}
+
+func isLetter(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		ch == '_'
+}
+
+func isDigit(ch rune) bool {
+	return ch >= '0' && ch <= '9'
+}
+
+// scanIdentifier reads a full identifier or keyword starting from the
+// current character (already consumed by advance into ch).
+func (l *Lexer) scanIdentifier() string {
+	f := l.currentFile
+	// start is the position of the first character (already consumed).
+	start := f.position
+	for isLetter(l.peek()) || isDigit(l.peek()) {
+		l.advance()
+	}
+	return string(f.source[start : f.position+1])
+}
+
+func (l *Lexer) scanString() (string, error) {
+	f := l.currentFile
+
+	start := f.readPos
+
+	for {
+		ch := l.advance()
+
+		if ch == 0 {
+			return "", fmt.Errorf("unterminated string")
+		}
+
+		if ch == '"' {
+			break
+		}
+	}
+
+	end := f.position
+
+	return string(f.source[start:end]), nil
 }
 
 func FileExist(filePath string) (bool, error) {

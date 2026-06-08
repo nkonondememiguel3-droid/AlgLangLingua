@@ -1,0 +1,67 @@
+[meta]
+name       = "English"
+version    = "1.0"
+decimal_sep = "."        # "." for English, "," for French
+
+[keywords]
+# Program structure
+algorithm   = "algorithm"
+variable    = "var"
+constant    = "const"
+type        = "type"
+begin       = "begin"
+end         = "end"
+
+# Functions / Methods
+function     = "function"
+end_function = "endfunction"
+method       = "method"
+end_method   = "endmethod"
+return       = "return"
+
+# Structures
+structure  = "struct"
+end_struct = "endstruct"
+
+# Control flow
+if       = "if"
+then     = "then"
+else     = "else"
+elseif   = "elseif"
+endif    = "endif"
+for      = "for"
+to       = "to"
+step     = "step"
+endfor   = "endfor"
+while    = "while"
+do       = "do"
+endwhile = "endwhile"
+repeat   = "repeat"
+until    = "until"
+
+# Types
+integer_type   = "integer"
+double_type    = "real"
+string_type    = "string"
+character_type = "char"
+boolean_type   = "bool"
+table          = "array"
+of             = "of"
+
+# Logical operators
+and = "and"
+or  = "or"
+not = "not"
+mod = "mod"
+
+# I/O
+write = "write"
+read  = "read"
+
+# Boolean literals
+true  = "true"
+false = "false"
+
+# Other
+nil   = "nil"
+class = "class"
