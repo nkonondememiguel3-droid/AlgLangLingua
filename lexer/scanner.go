@@ -29,6 +29,16 @@ type Lexer struct {
 	currentFile *FileContext
 	decimalSep  rune
 	Diagnostics errs.DiagnosticList
+
+	keywords token.KeywordMap
+
+	// importedPaths holds the canonical absolute path of every file that
+	// has already been fully scanned. Used to skip duplicate imports.
+	importedPaths map[string]bool
+
+	// activeStack holds the canonical absolute paths of files currently
+	// being scanned (i.e. on fileStack + currentFile). Used to detect cycles.
+	activeStack map[string]bool
 }
 
 func If[T any](condition bool, trueValue, falseValue T) T {
@@ -49,15 +59,20 @@ func (l *Lexer) diagnosticErrorf(format string, args ...any) error {
 
 func New(fileContext FileContext, cfg ...*config.Config) *Lexer {
 	l := &Lexer{
-		currentFile: &fileContext,
-		decimalSep:  '.',
+		currentFile:   &fileContext,
+		decimalSep:    '.',
+		keywords:      token.KeywordMap{},
+		importedPaths: make(map[string]bool),
+		activeStack:   make(map[string]bool),
 	}
+
 	if len(cfg) > 0 && cfg[0] != nil {
-		token.RegisterKeywords(buildKeywordMap(cfg[0]))
+		l.keywords = token.BuildKeywordMap(buildKeywordPairs(cfg[0]))
 		if cfg[0].Meta.DecimalSep == "," {
 			l.decimalSep = ','
 		}
 	}
+
 	if fileContext.Filename != "" {
 		if err := l.PushFile(fileContext.Filename); err != nil {
 			// File-open failures are fatal setup errors, not scan diagnostics.
@@ -72,12 +87,13 @@ func New(fileContext FileContext, cfg ...*config.Config) *Lexer {
 	return l
 }
 
-func buildKeywordMap(cfg *config.Config) map[string]token.TokenType {
+func buildKeywordPairs(cfg *config.Config) map[string]token.TokenType {
 	kw := cfg.Keywords
 	return map[string]token.TokenType{
 		kw.Algorithm: token.ALGORITHM,
-		kw.Variable:  token.VARIABLE,
+		kw.Import:    token.IMPORT,
 		kw.Constant:  token.CONSTANT,
+		kw.Variable:  token.VARIABLE,
 		kw.Type:      token.TYPE,
 		kw.Begin:     token.BEGIN,
 		kw.End:       token.END,
@@ -130,18 +146,40 @@ func buildKeywordMap(cfg *config.Config) map[string]token.TokenType {
 	}
 }
 
+// errAlreadyImported is returned by PushFile when the file has already been
+// fully scanned. It is not a real error — the caller should just skip.
+var errAlreadyImported = fmt.Errorf("already imported")
+
 func (l *Lexer) PushFile(path string) error {
 	result, err := FileExist(path)
 	if result != true {
 		return err
 	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("Can not resolve path %q: %w\n", path, err)
+	}
+
+	// clyclic import detection.
+	if l.activeStack[abs] {
+		return fmt.Errorf("cyclic import: %q is already being scanned", abs)
+	}
+
+	// duplication import.
+	if l.importedPaths[abs] {
+		return errAlreadyImported
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
+
 	stat, _ := f.Stat()
 	data := make([]byte, stat.Size())
 	f.Read(data)
+
 	cxt := &FileContext{
 		Filename: path,
 		File:     f,
@@ -149,24 +187,45 @@ func (l *Lexer) PushFile(path string) error {
 		line:     1,
 		column:   1,
 	}
+
 	if l.currentFile != nil {
 		l.fileStack = append(l.fileStack, l.currentFile)
 	}
 	l.currentFile = cxt
+	l.activeStack[abs] = true
+
 	return nil
 }
 
 func (l *Lexer) PopFile() bool {
-	if l.currentFile.Filename != "main.al" && l.currentFile.File != nil {
+	if l.currentFile != nil && l.currentFile.Filename != "" {
+		abs, err := filepath.Abs(l.currentFile.Filename)
+		if err == nil {
+			delete(l.activeStack, abs)
+			l.importedPaths[abs] = true
+		}
+	}
+	if l.currentFile != nil && l.currentFile.File != nil {
 		l.currentFile.File.Close()
 	}
+
 	n := len(l.fileStack)
 	if n == 0 {
+		// No parent to return to - leave currentFile as-is so the caller
+		// can still read its filename for diagnostics.
 		return false
 	}
+
 	l.currentFile = l.fileStack[n-1]
 	l.fileStack = l.fileStack[:n-1]
 	return true
+}
+
+// resolveImportPath turns a module name (e.g. "math_utils") into a file
+// path relative to the directory of the currently-scanning file.
+func (l *Lexer) resolveImportPath(moduleName string) string {
+	dir := filepath.Dir(l.currentFile.Filename)
+	return filepath.Join(dir, moduleName+".al")
 }
 
 func (l *Lexer) advance() rune {
@@ -216,21 +275,87 @@ func (l *Lexer) newToken(tt token.TokenType, lexeme string, literal any) token.T
 	}
 }
 
-// ScanTokens scans the entire source and returns all tokens together
-// with the full list of diagnostics collected during scanning.
-// Errors do not stop the scan - all diagnostics accumulate so the
-// caller sees every problem in one pass.
-func (l *Lexer) ScanTokens() ([]token.Token, *errs.DiagnosticList) {
-	if l.currentFile.File != nil {
-		defer l.currentFile.File.Close()
-	}
+// scanImport handles the token stream after the IMPORT keyword has been
+// scanned. It reads ": name (, name)* ;" from the current source, pushes
+// each named file, scans it recursively, and returns the tokens produced
+// by all imported files. The import statement tokens themselves are also
+// returned so the parser sees the full syntax.
+func (l *Lexer) scanImport(importTok token.Token) []token.Token {
+	var result []token.Token
+	result = append(result, importTok)
 
+	// expect ':'
+	colonTok, ok := l.expectPunct(':')
+	if !ok {
+		return result
+	}
+	result = append(result, colonTok)
+
+	// read one or more comma-separated module names until ';'
+	for {
+		// skip whitespace is handled by advance() calls inside scanIdentifier.
+		// We need the next non-whitespace character.
+		l.skipWhitespace()
+		if l.isAtEnd() {
+			l.diagnosticErrorf("unexpected end of file in import declaration")
+			return result
+		}
+
+		// read module name
+		ch := l.advance()
+		if !isLetter(ch) {
+			l.diagnosticErrorf("expected module name, got %q", ch)
+			return result
+		}
+		word := l.scanIdentifier()
+		nameTok := l.newToken(token.IDENTIFIER, word, nil)
+		result = append(result, nameTok)
+
+		// push and recursively scan the imported file
+		importPath := l.resolveImportPath(word)
+		err := l.PushFile(importPath)
+		switch {
+		case err == nil:
+			// scan the new file; its tokens appear before we continue here
+			imported, _ := l.scanFile()
+			result = append(result, imported...)
+		case errors.Is(err, errAlreadyImported):
+			// silently skip — module already in token stream
+		default:
+			l.diagnosticErrorf("cannot import %q: %v", word, err)
+		}
+
+		// next must be ',' (more modules) or ';' (end of import)
+		l.skipWhitespace()
+		if l.isAtEnd() {
+			l.diagnosticErrorf("unterminated import declaration")
+			return result
+		}
+		ch = l.advance()
+		if ch == ';' {
+			result = append(result, l.newToken(token.SEMICOLON, ";", nil))
+			return result
+		}
+		if ch == ',' {
+			result = append(result, l.newToken(token.COMMA, ",", nil))
+			continue
+		}
+		l.diagnosticErrorf("expected ',' or ';' in import, got %q", ch)
+		return result
+	}
+}
+
+func (l *Lexer) scanFile() ([]token.Token, bool) {
 	var tokens []token.Token
+	isFileOnDisk := l.currentFile.File != nil
 
 	for {
 		ch := l.advance()
 		if ch == 0 {
-			break
+			if isFileOnDisk {
+				l.PopFile()
+			}
+			return tokens, true
 		}
 
 		f := l.currentFile
@@ -271,7 +396,6 @@ func (l *Lexer) ScanTokens() ([]token.Token, *errs.DiagnosticList) {
 
 		case '/':
 			if l.match('/') {
-				// single-line comment: consume to end of line
 				for l.peek() != '\n' && !l.isAtEnd() {
 					l.advance()
 				}
@@ -307,7 +431,6 @@ func (l *Lexer) ScanTokens() ([]token.Token, *errs.DiagnosticList) {
 			if value, ok := l.scanString(); ok {
 				tokens = append(tokens, l.newToken(token.STRING, value, value))
 			}
-			// on failure diagnosticErrorf already recorded it; continue scanning
 
 		case '\'':
 			if tok, ok := l.scanChar(); ok {
@@ -319,18 +442,27 @@ func (l *Lexer) ScanTokens() ([]token.Token, *errs.DiagnosticList) {
 				tokens = append(tokens, l.scanNumber(ch))
 			} else if isLetter(ch) {
 				word := l.scanIdentifier()
-				tt := token.LookupKeyword(word)
-				tokens = append(tokens, l.newToken(tt, word, nil))
+				tt := l.keywords.Lookup(word)
+				tok := l.newToken(tt, word, nil)
+				if tt == token.IMPORT {
+					imported := l.scanImport(tok)
+					tokens = append(tokens, imported...)
+				} else {
+					tokens = append(tokens, tok)
+				}
 			} else {
 				l.diagnosticErrorf("unexpected character %q", ch)
 			}
 
-			// suppress the unused variable warning for f on error-only paths
 			_ = f
 		}
 	}
+}
 
-	return tokens, &l.Diagnostics
+// ScanTokens is the public entry point.
+func (l *Lexer) ScanTokens() ([]token.Token, *errs.DiagnosticList) {
+	toks, _ := l.scanFile()
+	return toks, &l.Diagnostics
 }
 
 // skipBlockComment consumes everything up to and including the closing */.
@@ -565,6 +697,42 @@ func (l *Lexer) scanNumber(first rune) token.Token {
 	lexeme := string(f.source[start : f.position+1])
 	val, _ := strconv.ParseInt(lexeme, 10, 64)
 	return l.newToken(token.INTEGER, lexeme, val)
+}
+
+// skipWhitespace advances past spaces, tabs, carriage returns, and newlines.
+func (l *Lexer) skipWhitespace() {
+	for {
+		ch := l.peek()
+		if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
+			return
+		}
+		l.advance()
+	}
+}
+
+// expectPunct advances past whitespace, then consumes the expected rune.
+// Records a diagnostic and returns (zero, false) if it isn't found.
+func (l *Lexer) expectPunct(expected rune) (token.Token, bool) {
+	l.skipWhitespace()
+	ch := l.advance()
+	if ch != expected {
+		l.diagnosticErrorf("expected %q, got %q", expected, ch)
+		return token.Token{}, false
+	}
+	return l.newToken(punctToTokenType(expected), string(expected), nil), true
+}
+
+func punctToTokenType(ch rune) token.TokenType {
+	switch ch {
+	case ':':
+		return token.COLON
+	case ';':
+		return token.SEMICOLON
+	case ',':
+		return token.COMMA
+	default:
+		return token.EOF
+	}
 }
 
 func FileExist(filePath string) (bool, error) {

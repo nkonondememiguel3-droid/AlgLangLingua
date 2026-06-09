@@ -68,6 +68,7 @@ const (
 
 	// Program structure keywords
 	ALGORITHM
+	IMPORT
 	VARIABLE
 	CONSTANT
 	TYPE
@@ -131,21 +132,21 @@ const (
 	EOF
 )
 
-var keywords = map[string]TokenType{}
+// KeywordMap is an opaque keyword lookup table owned by each Lexer instance.
+type KeywordMap map[string]TokenType
 
-// RegisterKeywords populates the keyword lookup table from the loaded config.
-// Must be called once, before the lexer runs.
-func RegisterKeywords(kw map[string]TokenType) {
-	for k, v := range kw {
-		keywords[strings.ToLower(k)] = v
+// BuildKeywordMap constructs a fresh keyword map from the given surface→type pairs.
+func BuildKeywordMap(pairs map[string]TokenType) KeywordMap {
+	m := make(KeywordMap, len(pairs))
+	for k, v := range pairs {
+		m[strings.ToLower(k)] = v
 	}
-	// maps.Copy(keywords, kw)
+	return m
 }
 
-// LookupKeyword returns the TokenType for a surface word, or IDENTIFIER if
-// the word is not a keyword in the active language config.
-func LookupKeyword(word string) TokenType {
-	if tt, ok := keywords[strings.ToLower(word)]; ok {
+// Lookup returns the TokenType for word, or IDENTIFIER if not found.
+func (km KeywordMap) Lookup(word string) TokenType {
+	if tt, ok := km[strings.ToLower(word)]; ok {
 		return tt
 	}
 	return IDENTIFIER
@@ -200,6 +201,7 @@ var tokens = [...]string{
 
 	// Program structure
 	ALGORITHM: "ALGORITHM",
+	IMPORT:    "IMPORT",
 	VARIABLE:  "VAR",
 	CONSTANT:  "CONST",
 	TYPE:      "TYPE",

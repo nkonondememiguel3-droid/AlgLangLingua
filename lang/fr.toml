@@ -5,6 +5,7 @@ decimal_sep = ","
 
 [keywords]
 algorithm   = "algorithme"
+import      = "importer"
 variable    = "variables"
 constant    = "constantes"
 type        = "type"

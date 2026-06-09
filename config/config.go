@@ -18,6 +18,7 @@ type Meta struct {
 // Each field name matches the TOML key exactly.
 type Keywords struct {
 	Algorithm string `toml:"algorithm"`
+	Import    string `toml:"import"`
 	Variable  string `toml:"variable"`
 	Constant  string `toml:"constant"`
 	Type      string `toml:"type"`
@@ -114,6 +115,7 @@ func (c *Config) validate() error {
 	kw := c.Keywords
 	pairs := [][2]string{
 		{"algorithm", kw.Algorithm},
+		{"import", kw.Import},
 		{"variable", kw.Variable},
 		{"constant", kw.Constant},
 		{"type", kw.Type},

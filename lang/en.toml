@@ -6,6 +6,7 @@ decimal_sep = "."        # "." for English, "," for French
 [keywords]
 # Program structure
 algorithm   = "algorithm"
+import      = "import"
 variable    = "var"
 constant    = "const"
 type        = "type"
