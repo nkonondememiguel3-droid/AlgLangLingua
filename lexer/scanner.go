@@ -218,7 +218,7 @@ func (l *Lexer) newToken(tt token.TokenType, lexeme string, literal any) token.T
 
 // ScanTokens scans the entire source and returns all tokens together
 // with the full list of diagnostics collected during scanning.
-// Errors do not stop the scan — all diagnostics accumulate so the
+// Errors do not stop the scan - all diagnostics accumulate so the
 // caller sees every problem in one pass.
 func (l *Lexer) ScanTokens() ([]token.Token, *errs.DiagnosticList) {
 	if l.currentFile.File != nil {

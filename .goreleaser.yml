@@ -1,0 +1,29 @@
+project_name: alg
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: alg
+    binary: alg
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{ .Version }}_
+      {{ .Os }}_
+      {{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: uncle_d
+    name: alg
